@@ -1,5 +1,4 @@
 #include "server.h"
-#include "RRPG_MessageIdentifiers.h"
 
 #include "RakNetSocket2.h"
 #include "BitStream.h"
@@ -9,7 +8,7 @@
 #include <mutex>
 #include <conio.h>
 
-unsigned int Server::EXPECTED_PLAYERS = 3;
+unsigned int Server::EXPECTED_PLAYERS = 1;
 Server* Server::instance = nullptr;
 
 namespace
@@ -88,9 +87,20 @@ void Server::PacketHandler()
 				case RRPG_ID::C_PLAYER_LIST_REQUEST:
 					OnPlayerListRequest(p);
 					break;
+				case RRPG_ID::C_PLAYER_STATS_REQUEST:
+					OnPlayerStatsRequest(p);
+					break;
+				case RRPG_ID::C_CHAT:
+					OnClientChatReceived(p);
+					break;
+				case RRPG_ID::C_JOB_CHOSEN:
+					OnPlayerJobChosen(p);
+					break;
+				case RRPG_ID::C_ACTION_TAKEN:
+					OnPlayerActionTaken(p);
+					break;
 				default:
-					// It's a client, so just show the message
-					printf("%s\n", p->data);
+					printf("client packet with no ID: %s\n", p->data);
 					break;
 				}
 			}
@@ -120,16 +130,19 @@ bool Server::IsLowLevelPacketHandled(RakNet::Packet* p)
 		break;
 	case ID_ALREADY_CONNECTED:
 		// Connection lost normally
-		printf("ID_ALREADY_CONNECTED with guid %" PRINTF_64_BIT_MODIFIER "u\n", p->guid);
+		printf("ID_ALREADY_CONNECTED");
+// 		printf("ID_ALREADY_CONNECTED with guid %" PRINTF_64_BIT_MODIFIER "u\n", p->guid);
 		break;
 	case ID_INCOMPATIBLE_PROTOCOL_VERSION:
 		printf("ID_INCOMPATIBLE_PROTOCOL_VERSION\n");
 		break;
 	case ID_REMOTE_DISCONNECTION_NOTIFICATION: // Server telling the clients of another client disconnecting gracefully.  You can manually broadcast this in a peer to peer enviroment if you want.
 		printf("ID_REMOTE_DISCONNECTION_NOTIFICATION\n");
+		totalConnections--;
 		break;
 	case ID_REMOTE_CONNECTION_LOST: // Server telling the clients of another client disconnecting forcefully.  You can manually broadcast this in a peer to peer enviroment if you want.
 		printf("ID_REMOTE_CONNECTION_LOST\n");
+		totalConnections--;
 		break;
 	case ID_NEW_INCOMING_CONNECTION:
 	case ID_REMOTE_NEW_INCOMING_CONNECTION: // Server telling the clients of another client connecting.  You can manually broadcast this in a peer to peer enviroment if you want.
@@ -169,6 +182,9 @@ void Server::OnClientIntro(RakNet::Packet* p)
 		rpi->CloseConnection(p->systemAddress, true);
 		totalConnections--;
 	}
+	
+	playerAddresses.emplace(RakNet::RakNetGUID::ToUint32(p->guid), p->systemAddress);
+
 	char* name = new char[256];
 	RakNet::BitStream bs(p->data, p->length, false);
 	bs.IgnoreBits(8);
@@ -183,10 +199,34 @@ void Server::OnClientIntro(RakNet::Packet* p)
 	if (totalConnections != EXPECTED_PLAYERS)
 	{
 		char buffer[40];
-		snprintf(buffer, 40, "Waiting for %i more players...", EXPECTED_PLAYERS - totalConnections);
+		snprintf(buffer, 40, "Waiting for %i more player%s..", 
+			EXPECTED_PLAYERS - totalConnections, 
+			(EXPECTED_PLAYERS - totalConnections == 1 ? "." : "s.")
+		);
 		BroadcastMessage(&buffer[0]);
 	}
 	delete[] name;
+}
+
+void Server::OnClientChatReceived(RakNet::Packet* p)
+{
+	Player player = GetPlayer(p->guid);
+	char* cmsg = new char[2048];
+	char* message = new char[2048 + player.name.length()];
+
+	RakNet::BitStream bs(p->data, p->length, false);
+	bs.IgnoreBits(8);
+	RakNet::StringCompressor::Instance()->DecodeString(cmsg, 2048, &bs);
+
+	memcpy(message, player.name.c_str(), player.name.length());
+	memcpy(message + player.name.length(), ": ", 2);
+	memcpy(message + player.name.length() + 2, cmsg, strlen(cmsg) + 1);
+
+	std::cout << message << std::endl;
+	rpi->Send(message, (const int)strlen(message) + 1, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
+
+	delete[] cmsg;
+	delete[] message;
 }
 
 void Server::OnPlayerReady(RakNet::Packet* p)
@@ -201,7 +241,8 @@ void Server::OnPlayerReady(RakNet::Packet* p)
 		if (!it.second.ready)
 			return;
 
-	StartGame();
+	if (totalConnections == EXPECTED_PLAYERS)
+		StartGame();
 }
 
 void Server::OnPlayerUnready(RakNet::Packet* p)
@@ -227,6 +268,95 @@ void Server::OnPlayerListRequest(RakNet::Packet* p)
 	rpi->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, p->systemAddress, false);
 }
 
+void Server::OnPlayerJobChosen(RakNet::Packet* p)
+{
+	Player& player = GetPlayer(p->guid);
+	player.ready = true;
+
+	RakNet::BitStream bs(p->data, p->length, false);
+	bs.IgnoreBits(8);
+	bs.Read(player.job);
+	
+	char buffer[1024];
+	snprintf(buffer, 1024, "%s has chosen to be a %s\n", player.name.c_str(),
+		(player.job == CharacterClass::Wizard ? "Wizard" :
+			player.job == CharacterClass::Warrior ? "Warrior" :
+			player.job == CharacterClass::Assassin ? "Assassin" :
+			"Jobless"));
+
+	BroadcastMessage(&buffer[0]);
+
+	auto it = players.find(currentPlayerTurn);
+	it++;
+	if (it == players.end())
+	{
+		gameState = GS_MAIN;
+		RakNet::BitStream gsBs;
+		gsBs.Write((unsigned char)RRPG_ID::S_UPDATE_GAME_STATE);
+		gsBs.Write(gameState);
+		gsBs.Write((int)players.size());
+		for (const auto& it : players)
+			gsBs.Write(it.second);
+
+		rpi->Send(&gsBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
+		NextTurn();
+	}
+	else
+	{
+		currentPlayerTurn = it->first;
+		RakNet::BitStream ttBs;
+		ttBs.Write((unsigned char)RRPG_ID::S_TAKE_TURN);
+		rpi->Send(&ttBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, GetAddressFromID(currentPlayerTurn), false);
+	}
+}
+
+void Server::OnPlayerStatsRequest(RakNet::Packet* p)
+{
+	RakNet::BitStream bs;
+	bs.Write((unsigned char)RRPG_ID::S_REPLY_PLAYER_STATS_REQUEST);
+	bs.Write((int)players.size());
+	for (const auto& it : players)
+	{
+		RakNet::StringCompressor::Instance()->EncodeString(it.second.name.c_str(), 256, &bs);
+		bs.Write(it.second.job);
+		bs.Write(it.second.health);
+	}
+
+	rpi->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, p->systemAddress, false);
+}
+
+void Server::OnPlayerActionTaken(RakNet::Packet* p)
+{
+	Action action;
+	char* target = new char[256];
+	RakNet::BitStream bs(p->data, p->length, false);
+	bs.IgnoreBits(8);
+	bs.Read(action);
+	RakNet::StringCompressor::Instance()->DecodeString(target, 256, &bs);
+
+	Player* player = GetPlayerWithName(target);
+	if (player != nullptr)
+	{
+		std::cout << "found player" << std::endl;
+	}
+	delete[] target;
+}
+
+void Server::NextTurn()
+{
+	auto it = players.find(currentPlayerTurn);
+	it++;
+
+	if (it == players.end())
+		it = players.begin();
+
+	currentPlayerTurn = it->first;
+
+	RakNet::BitStream ttBs;
+	ttBs.Write((unsigned char)RRPG_ID::S_TAKE_TURN);
+	rpi->Send(&ttBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, GetAddressFromID(currentPlayerTurn), false);
+}
+
 void Server::GameLoop()
 {
 	if (networkState == NS_CREATE_SOCKET)
@@ -245,7 +375,22 @@ void Server::GameLoop()
 
 void Server::StartGame()
 {
-	std::cout << "WE HAVE BEEGUN!!" << std::endl;
+	std::cout << "Game has started." << std::endl;
+	networkState = NS_GAME_STARTED;
+	gameState = GS_CHARACTER_SELECT;
+	RakNet::BitStream bs;
+	bs.Write((unsigned char)RRPG_ID::S_GAME_STARTED);
+	rpi->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
+
+	for (auto& it : players)
+		it.second.ready = false;
+
+	auto it = players.begin();
+	currentPlayerTurn = it->first;
+	
+	RakNet::BitStream ttBs;
+	ttBs.Write((unsigned char)RRPG_ID::S_TAKE_TURN);
+	rpi->Send(&ttBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, GetAddressFromID(currentPlayerTurn), false);
 }
 
 Player& Server::GetPlayer(RakNet::RakNetGUID id)
@@ -253,6 +398,22 @@ Player& Server::GetPlayer(RakNet::RakNetGUID id)
 	unsigned long guid = RakNet::RakNetGUID::ToUint32(id);
 	auto it = players.find(guid);
 	assert(it != players.end());
+	return it->second;
+}
+
+Player* Server::GetPlayerWithName(const char* name)
+{
+	for (auto& it : players)
+		if (it.second.name == name)
+			return &it.second;
+
+	return nullptr;
+}
+
+RakNet::SystemAddress Server::GetAddressFromID(unsigned long id)
+{
+	auto it = playerAddresses.find(id);
+	assert(it != playerAddresses.end());
 	return it->second;
 }
 
