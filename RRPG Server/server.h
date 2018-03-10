@@ -36,6 +36,7 @@ private:
 	void OnClientIntro(RakNet::Packet* p);
 	void OnPlayerReady(RakNet::Packet* p);
 	void OnPlayerUnready(RakNet::Packet* p);
+	void OnPlayerListRequest(RakNet::Packet* p);
 	void GameLoop();
 	void StartGame();
 	Player& GetPlayer(RakNet::RakNetGUID id);

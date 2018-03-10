@@ -33,8 +33,12 @@ private:
 
 	void InputHandler();
 	void PacketHandler();
-	bool IsLowLevelPacketHandled(RakNet::Packet* packet);
-	void OnConnectionAccepted(RakNet::Packet* packet);
+	bool IsLowLevelPacketHandled(RakNet::Packet* p);
+	void OnConnectionAccepted(RakNet::Packet* p);
+	void OnPlayersListReceived(RakNet::Packet* p);
+	void Ready();
+	void Unready();
+	void RequestPlayersFromServer();
 
 	bool IsRunning() const;
 
@@ -48,5 +52,6 @@ private:
 	unsigned int clientPort;
 	unsigned int serverPort;
 	std::string serverAddress;
+	std::mutex player_mutex;
 	Player player;
 };

@@ -9,7 +9,6 @@
 #include <mutex>
 #include <conio.h>
 
-
 unsigned int Server::EXPECTED_PLAYERS = 3;
 Server* Server::instance = nullptr;
 
@@ -40,7 +39,6 @@ Server::Server()
 
 void Server::Start()
 {
-
 	std::cout << "RRPG Server" << std::endl;
 	std::cout << "Enter listening port: ";
 	std::cin >> port;
@@ -78,14 +76,17 @@ void Server::PacketHandler()
 
 				switch (packetIdentifier)
 				{
-				case RRPG_ID::CLIENT_INTRO:
+				case RRPG_ID::C_INTRO:
 					OnClientIntro(p);
 					break;
-				case RRPG_ID::CLIENT_READY:
+				case RRPG_ID::C_READY:
 					OnPlayerReady(p);
 					break;
-				case RRPG_ID::CLIENT_UNREADY:
+				case RRPG_ID::C_UNREADY:
 					OnPlayerUnready(p);
+					break;
+				case RRPG_ID::C_PLAYER_LIST_REQUEST:
+					OnPlayerListRequest(p);
 					break;
 				default:
 					// It's a client, so just show the message
@@ -178,11 +179,8 @@ void Server::OnClientIntro(RakNet::Packet* p)
 	players.emplace(RakNet::RakNetGUID::ToUint32(p->guid), Player{ std::string(name), 100, ready });
 	memcpy(name + strlen(name), " has joined.", 13);
 	BroadcastMessage(name);
-	if (totalConnections == EXPECTED_PLAYERS)
-	{
-		StartGame();
-	}
-	else
+
+	if (totalConnections != EXPECTED_PLAYERS)
 	{
 		char buffer[40];
 		snprintf(buffer, 40, "Waiting for %i more players...", EXPECTED_PLAYERS - totalConnections);
@@ -215,6 +213,20 @@ void Server::OnPlayerUnready(RakNet::Packet* p)
 	BroadcastMessage(msg.c_str());
 }
 
+void Server::OnPlayerListRequest(RakNet::Packet* p)
+{
+	RakNet::BitStream bs;
+	bs.Write((unsigned char)RRPG_ID::S_REPLY_PLAYER_LIST_REQUEST);
+	bs.Write((int)players.size());
+	for (const auto& it : players)
+	{
+		RakNet::StringCompressor::Instance()->EncodeString(it.second.name.c_str(), 256, &bs);
+		bs.Write(it.second.ready);
+	}
+
+	rpi->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, p->systemAddress, false);
+}
+
 void Server::GameLoop()
 {
 	if (networkState == NS_CREATE_SOCKET)
@@ -233,6 +245,7 @@ void Server::GameLoop()
 
 void Server::StartGame()
 {
+	std::cout << "WE HAVE BEEGUN!!" << std::endl;
 }
 
 Player& Server::GetPlayer(RakNet::RakNetGUID id)
