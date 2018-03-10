@@ -45,6 +45,7 @@ private:
 	void OnPlayerActionTaken(RakNet::Packet* p);
 
 	void NextTurn();
+	void ModifyHealth(Player& player, int diff);
 
 	void GameLoop();
 	void StartGame();

@@ -49,6 +49,7 @@ private:
 	void OnMainGameStart(RakNet::Packet* p);
 	void OnTakeTurn(RakNet::Packet* p);
 	void OnGameStateUpdate(RakNet::Packet* p);
+	void OnPlayersHealthUpdated(RakNet::Packet* p);
 
 	void Ready();
 	void Unready();

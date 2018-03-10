@@ -335,10 +335,9 @@ void Server::OnPlayerActionTaken(RakNet::Packet* p)
 	RakNet::StringCompressor::Instance()->DecodeString(target, 256, &bs);
 
 	Player* player = GetPlayerWithName(target);
-	if (player != nullptr)
-	{
-		std::cout << "found player" << std::endl;
-	}
+	assert(player == nullptr);
+
+	
 	delete[] target;
 }
 
@@ -355,6 +354,16 @@ void Server::NextTurn()
 	RakNet::BitStream ttBs;
 	ttBs.Write((unsigned char)RRPG_ID::S_TAKE_TURN);
 	rpi->Send(&ttBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, GetAddressFromID(currentPlayerTurn), false);
+}
+
+void Server::ModifyHealth(Player& player, int diff)
+{
+	player.health += diff;
+	RakNet::BitStream bs;
+	bs.Write((unsigned char)RRPG_ID::S_UPDATE_PLAYER_HP);
+	RakNet::StringCompressor::Instance()->EncodeString(player.name.c_str(), (int) player.name.length() + 1, &bs);
+	bs.Write(player.health);
+	rpi->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
 }
 
 void Server::GameLoop()
