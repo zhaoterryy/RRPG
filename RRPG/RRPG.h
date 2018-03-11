@@ -47,6 +47,7 @@ private:
 	void OnPlayersStatsReceived(RakNet::Packet* p);
 	void OnGameStart(RakNet::Packet* p);
 	void OnMainGameStart(RakNet::Packet* p);
+	void OnGameOver(RakNet::Packet* p);
 	void OnTakeTurn(RakNet::Packet* p);
 	void OnGameStateUpdate(RakNet::Packet* p);
 	void OnPlayersHealthUpdated(RakNet::Packet* p);
@@ -55,6 +56,7 @@ private:
 	void Unready();
 	void RequestPlayersFromServer();
 	void RequestPlayerStatsFromServer();
+	void PrintLocalPlayerStats();
 
 	bool IsRunning() const;
 	void GameLoop();

@@ -24,6 +24,7 @@ enum GameState : unsigned char
 {
 	GS_PENDING,
 	GS_CHARACTER_SELECT,
-	GS_MAIN
+	GS_MAIN,
+	GS_GAME_OVER,
 };
 

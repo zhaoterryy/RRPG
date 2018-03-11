@@ -6,9 +6,9 @@
 #include <iostream>
 #include <thread>
 #include <mutex>
-#include <conio.h>
+#include <random>
 
-unsigned int Server::EXPECTED_PLAYERS = 1;
+unsigned int Server::EXPECTED_PLAYERS = 3;
 Server* Server::instance = nullptr;
 
 namespace
@@ -27,6 +27,14 @@ namespace
 		{
 			return (unsigned char)packet->data[0];
 		}
+	}
+	
+	std::random_device rd;
+	std::mt19937 rng(rd());
+	int GetRandomInteger(int min, int max)
+	{
+		std::uniform_int_distribution<int> uni(min, max);
+		return uni(rng);
 	}
 }
 
@@ -114,7 +122,10 @@ void Server::InputHandler()
 	{
 		char input[2048];
 		std::cin.getline(input, sizeof(input));
-		BroadcastMessage(&input[0]);
+		if (input == ".quit")
+			isQuitting = true;
+		else
+			BroadcastMessage(&input[0]);
 	}
 }
 
@@ -192,7 +203,7 @@ void Server::OnClientIntro(RakNet::Packet* p)
 	bool ready;
 	bs.Read(ready);
 
-	players.emplace(RakNet::RakNetGUID::ToUint32(p->guid), Player{ std::string(name), 100, ready });
+	players.emplace(RakNet::RakNetGUID::ToUint32(p->guid), Player{ std::string(name) });
 	memcpy(name + strlen(name), " has joined.", 13);
 	BroadcastMessage(name);
 
@@ -288,19 +299,9 @@ void Server::OnPlayerJobChosen(RakNet::Packet* p)
 
 	auto it = players.find(currentPlayerTurn);
 	it++;
-	if (it == players.end())
-	{
-		gameState = GS_MAIN;
-		RakNet::BitStream gsBs;
-		gsBs.Write((unsigned char)RRPG_ID::S_UPDATE_GAME_STATE);
-		gsBs.Write(gameState);
-		gsBs.Write((int)players.size());
-		for (const auto& it : players)
-			gsBs.Write(it.second);
 
-		rpi->Send(&gsBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
-		NextTurn();
-	}
+	if (it == players.end())
+		StartMainGame();
 	else
 	{
 		currentPlayerTurn = it->first;
@@ -328,17 +329,53 @@ void Server::OnPlayerStatsRequest(RakNet::Packet* p)
 void Server::OnPlayerActionTaken(RakNet::Packet* p)
 {
 	Action action;
-	char* target = new char[256];
+	char* tname = new char[256];
 	RakNet::BitStream bs(p->data, p->length, false);
 	bs.IgnoreBits(8);
 	bs.Read(action);
-	RakNet::StringCompressor::Instance()->DecodeString(target, 256, &bs);
+	RakNet::StringCompressor::Instance()->DecodeString(tname, 256, &bs);
 
-	Player* player = GetPlayerWithName(target);
-	assert(player == nullptr);
+	Player* target = GetPlayerWithName(tname);
+	Player& origin = GetPlayer(p->guid);
+	assert(target != nullptr);
 
-	
-	delete[] target;
+	char buffer[256];
+	switch (action)
+	{
+		case Action::Heal:
+		{			
+			snprintf(buffer, 256, "%s healed %s for %i", origin.name.c_str(), target->name.c_str(), 10);
+			BroadcastMessage(&buffer[0]);
+			ModifyHealth(*target, 10);
+			break;
+		}
+		case Action::HealRng:
+		{
+			int healAmount = GetRandomInteger(5, 15);			
+			snprintf(buffer, 256, "%s randomly healed %s for %i", origin.name.c_str(), target->name.c_str(), healAmount);
+			BroadcastMessage(&buffer[0]);
+			ModifyHealth(*target, healAmount);
+			break;
+		}
+		case Action::Attack:
+		{			
+			snprintf(buffer, 256, "%s attacked %s for %i", origin.name.c_str(), target->name.c_str(), 12);
+			BroadcastMessage(&buffer[0]);
+			ModifyHealth(*target, -12);
+			break;
+		}
+		case Action::AtkRng:
+		{
+			int atkAmount = -GetRandomInteger(6, 18);			
+			snprintf(buffer, 256, "%s randomly attacked %s for %i", origin.name.c_str(), target->name.c_str(), -atkAmount);
+			BroadcastMessage(&buffer[0]);
+			ModifyHealth(*target, atkAmount);
+			break;
+		}
+	}
+
+	NextTurn();
+	delete[] tname;
 }
 
 void Server::NextTurn()
@@ -346,10 +383,26 @@ void Server::NextTurn()
 	auto it = players.find(currentPlayerTurn);
 	it++;
 
-	if (it == players.end())
-		it = players.begin();
+	while (it == players.end() || it->second.dead)
+	{
+		if (it == players.end())
+			it = players.begin();
+		else
+			it++;
+	}
 
 	currentPlayerTurn = it->first;
+
+	if (std::count_if(players.begin(), players.end(), [](std::pair<unsigned long, Player> p) { return p.second.dead == false; }) == 1)
+	{
+		GameOver(currentPlayerTurn);
+		return;
+	}
+
+
+	char buffer[256];
+	snprintf(buffer, 256, "%s's turn", it->second.name.c_str());
+	BroadcastMessage(&buffer[0]);
 
 	RakNet::BitStream ttBs;
 	ttBs.Write((unsigned char)RRPG_ID::S_TAKE_TURN);
@@ -363,6 +416,13 @@ void Server::ModifyHealth(Player& player, int diff)
 	bs.Write((unsigned char)RRPG_ID::S_UPDATE_PLAYER_HP);
 	RakNet::StringCompressor::Instance()->EncodeString(player.name.c_str(), (int) player.name.length() + 1, &bs);
 	bs.Write(player.health);
+	if (player.health > 0)
+		printf("Internal: %s is now at %i health\n", player.name.c_str(), player.health);
+	else
+	{
+		printf("Internal: %s is dead\n", player.name.c_str());
+		player.dead = true;
+	}
 	rpi->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
 }
 
@@ -384,7 +444,7 @@ void Server::GameLoop()
 
 void Server::StartGame()
 {
-	std::cout << "Game has started." << std::endl;
+	std::cout << "Internal: Game has started." << std::endl;
 	networkState = NS_GAME_STARTED;
 	gameState = GS_CHARACTER_SELECT;
 	RakNet::BitStream bs;
@@ -402,10 +462,48 @@ void Server::StartGame()
 	rpi->Send(&ttBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, GetAddressFromID(currentPlayerTurn), false);
 }
 
+void Server::StartMainGame()
+{
+	gameState = GS_MAIN;
+	RakNet::BitStream gsBs;
+	gsBs.Write((unsigned char)RRPG_ID::S_UPDATE_GAME_STATE);
+	gsBs.Write(gameState);
+	gsBs.Write((int)players.size());
+	for (const auto& it : players)
+	{
+		RakNet::StringCompressor::Instance()->EncodeString(it.second.name.c_str(), 256, &gsBs);
+		gsBs.Write(it.second.health);
+		gsBs.Write(it.second.ready);
+		gsBs.Write(it.second.job);
+	}
+
+	rpi->Send(&gsBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
+	NextTurn();
+}
+
+void Server::GameOver(unsigned long winnerId)
+{
+	gameState = GS_GAME_OVER;
+	Player& player = GetPlayer(winnerId);
+	char buffer[256];
+	snprintf(buffer, 256, "%s wins!", player.name.c_str());
+	BroadcastMessage(&buffer[0]);
+	RakNet::BitStream bs;
+	bs.Write((unsigned char)RRPG_ID::S_UPDATE_GAME_STATE);
+	bs.Write(gameState);
+	
+	rpi->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, RakNet::UNASSIGNED_SYSTEM_ADDRESS, true);
+}
+
 Player& Server::GetPlayer(RakNet::RakNetGUID id)
 {
 	unsigned long guid = RakNet::RakNetGUID::ToUint32(id);
-	auto it = players.find(guid);
+	return GetPlayer(guid);
+}
+
+Player& Server::GetPlayer(unsigned long id)
+{
+	auto it = players.find(id);
 	assert(it != players.end());
 	return it->second;
 }
@@ -442,5 +540,5 @@ void Server::BroadcastMessage(const char* input)
 
 bool Server::IsRunning() const
 {
-	return true;
+	return !isQuitting;
 }

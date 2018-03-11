@@ -19,8 +19,9 @@ enum class Action : unsigned char
 struct Player
 {
 	std::string name = "";
-	unsigned int health = 100;
+	int health = 100;
 	bool ready = false;
 	CharacterClass job;
+	bool dead = false;
 };
 #pragma pack(pop)

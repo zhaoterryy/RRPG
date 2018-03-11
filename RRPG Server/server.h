@@ -35,21 +35,29 @@ private:
 	bool IsLowLevelPacketHandled(RakNet::Packet* p);
 
 	void OnIncomingConnection(RakNet::Packet* p);
+	// OnConnectionAccepted ->
 	void OnClientIntro(RakNet::Packet* p);
 	void OnClientChatReceived(RakNet::Packet* p);
 	void OnPlayerReady(RakNet::Packet* p);
 	void OnPlayerUnready(RakNet::Packet* p);
+	// RequestPlayersFromServer ->
 	void OnPlayerListRequest(RakNet::Packet* p);
 	void OnPlayerJobChosen(RakNet::Packet* p);
+	// RequestPlayerStatsFromServer ->
 	void OnPlayerStatsRequest(RakNet::Packet* p);
 	void OnPlayerActionTaken(RakNet::Packet* p);
 
+	// -> OnTakeTurn
 	void NextTurn();
+	// -> OnPlayersHealthUpdated 
 	void ModifyHealth(Player& player, int diff);
 
 	void GameLoop();
 	void StartGame();
+	void StartMainGame();
+	void GameOver(unsigned long winnerId);
 	Player& GetPlayer(RakNet::RakNetGUID id);
+	Player& GetPlayer(unsigned long id);
 	Player* GetPlayerWithName(const char* name);
 	RakNet::SystemAddress GetAddressFromID(unsigned long id);
 	void BroadcastMessage(const char* input);
@@ -71,5 +79,6 @@ private:
 	std::map<unsigned long, Player> players;
 	std::map<unsigned long, RakNet::SystemAddress> playerAddresses;
 	unsigned long currentPlayerTurn;
+	bool isQuitting;
 };
 
