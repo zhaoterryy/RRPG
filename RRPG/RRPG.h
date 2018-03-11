@@ -7,7 +7,6 @@
 #include <mutex>
 #include <vector>
 
-
 class RRPG
 {
 public:

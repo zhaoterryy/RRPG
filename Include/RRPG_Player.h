@@ -15,6 +15,23 @@ enum class Action : unsigned char
 	Attack,
 	AtkRng
 };
+
+inline const char* GetStringFromClass(CharacterClass cc)
+{
+	switch (cc)
+	{
+	case CharacterClass::Wizard:
+		return "Wizard";
+	case CharacterClass::Warrior:
+		return "Warrior";
+	case CharacterClass::Assassin:
+		return "Assassin";
+	default:
+		return "Jobless";
+	}
+}
+
+
 #pragma pack(push, 1)
 struct Player
 {

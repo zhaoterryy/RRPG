@@ -344,22 +344,25 @@ void Server::OnPlayerActionTaken(RakNet::Packet* p)
 	{
 		case Action::Heal:
 		{			
-			snprintf(buffer, 256, "%s healed %s for %i", origin.name.c_str(), target->name.c_str(), 10);
+			snprintf(buffer, 256, "%s The %s healed %s The %s for %i", 
+				origin.name.c_str(), GetStringFromClass(origin.job), target->name.c_str(), GetStringFromClass(target->job), 10);
 			BroadcastMessage(&buffer[0]);
 			ModifyHealth(*target, 10);
 			break;
 		}
 		case Action::HealRng:
 		{
-			int healAmount = GetRandomInteger(5, 15);			
-			snprintf(buffer, 256, "%s randomly healed %s for %i", origin.name.c_str(), target->name.c_str(), healAmount);
+			int healAmount = GetRandomInteger(5, 15);
+			snprintf(buffer, 256, "%s The %s randomly healed %s The %s for %i",
+				origin.name.c_str(), GetStringFromClass(origin.job), target->name.c_str(), GetStringFromClass(target->job), healAmount);
 			BroadcastMessage(&buffer[0]);
 			ModifyHealth(*target, healAmount);
 			break;
 		}
 		case Action::Attack:
 		{			
-			snprintf(buffer, 256, "%s attacked %s for %i", origin.name.c_str(), target->name.c_str(), 12);
+			snprintf(buffer, 256, "%s The %s attacked %s The %s for %i", 
+				origin.name.c_str(), GetStringFromClass(origin.job), target->name.c_str(), GetStringFromClass(target->job), 12);
 			BroadcastMessage(&buffer[0]);
 			ModifyHealth(*target, -12);
 			break;
@@ -367,7 +370,8 @@ void Server::OnPlayerActionTaken(RakNet::Packet* p)
 		case Action::AtkRng:
 		{
 			int atkAmount = -GetRandomInteger(6, 18);			
-			snprintf(buffer, 256, "%s randomly attacked %s for %i", origin.name.c_str(), target->name.c_str(), -atkAmount);
+			snprintf(buffer, 256, "%s The %s randomly attacked %s The %s for %i",
+				origin.name.c_str(), GetStringFromClass(origin.job), target->name.c_str(), GetStringFromClass(target->job), -atkAmount);
 			BroadcastMessage(&buffer[0]);
 			ModifyHealth(*target, atkAmount);
 			break;
